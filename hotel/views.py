@@ -24,10 +24,11 @@ class BookingViewSet(viewsets.ModelViewSet):
     queryset = Booking.objects.all()
     serializer_class = BookingSerializer
 
-    # автоматически привязываем пользователя
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    def get_queryset(self):
+        return Booking.objects.filter(user=self.request.user)
 
 class PlacementViewSet(viewsets.ModelViewSet):
     queryset = Placement.objects.all()
