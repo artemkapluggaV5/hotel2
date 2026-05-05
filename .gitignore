@@ -1,0 +1,69 @@
+### Django ###
+*.log
+*.pot
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite (если используешь)
+db.sqlite3
+db.sqlite3-journal
+
+# Media uploads
+media/
+mediafiles/
+
+# Static files (если собираешь collectstatic)
+staticfiles/
+
+# Django stuff
+local_settings.py
+*.sqlite3
+
+# Migrations cache (НЕ сами миграции!)
+**/__pycache__/
+**/migrations/__pycache__/
+
+# Env / secrets
+.env
+.env.*
+*.env
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Mac / OS files
+.DS_Store
+Thumbs.db
+
+# Testing / coverage
+htmlcov/
+.coverage
+coverage.xml
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Django collectstatic (если используешь)
+# staticfiles/
+
+### Node (если вдруг фронт будет) ###
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+### Backup files ###
+*.bak
+*.tmp
