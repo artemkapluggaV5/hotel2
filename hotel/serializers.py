@@ -1,6 +1,8 @@
-from rest_framework import serializers, viewsets
-from .models import *
+from rest_framework import serializers
 from django.contrib.auth.models import User
+from rest_framework.authtoken.models import Token
+
+from .models import *
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -10,15 +12,12 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class RoomSerializer(serializers.ModelSerializer):
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=Category.objects.all(),
-        source='category'
-    )
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
 
     class Meta:
         model = Room
         fields = [
-            'id', 'room_number', 'category_id', 'price',
+            'id', 'room_number', 'category', 'price',
             'amenities', 'features', 'description',
             'rating', 'rules', 'status'
         ]
@@ -44,27 +43,43 @@ class BookingSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['booking_date', 'total_price']
 
+    def validate(self, data):
+        if data['check_out_date'] <= data['check_in_date']:
+            raise serializers.ValidationError("Check-out date must be after check-in date.")
+        return data
+
 
 class PlacementSerializer(serializers.ModelSerializer):
-    room_id = serializers.PrimaryKeyRelatedField(
-        queryset=Room.objects.all(),
-        source='room'
-    )
-    booking_id = serializers.PrimaryKeyRelatedField(
-        queryset=Booking.objects.all(),
-        source='booking'
-    )
+    room = serializers.PrimaryKeyRelatedField(queryset=Room.objects.all())
+    booking = serializers.PrimaryKeyRelatedField(queryset=Booking.objects.all())
 
     class Meta:
         model = Placement
         fields = '__all__'
+        read_only_fields = ['price_per_night']
+
+    def validate(self, data):
+        room = data['room']
+        check_in = data['check_in_date']
+        check_out = data['check_out_date']
+
+        overlapping = Placement.objects.filter(
+            room=room,
+            check_in_date__lt=check_out,
+            check_out_date__gt=check_in,
+            status__in=['waiting', 'active']
+        )
+        if self.instance:
+            overlapping = overlapping.exclude(id=self.instance.id)
+
+        if overlapping.exists():
+            raise serializers.ValidationError({"room": "Room is already booked for these dates."})
+
+        return data
 
 
 class PaymentSerializer(serializers.ModelSerializer):
-    booking_id = serializers.PrimaryKeyRelatedField(
-        queryset=Booking.objects.all(),
-        source='booking'
-    )
+    booking = serializers.PrimaryKeyRelatedField(queryset=Booking.objects.all())
 
     class Meta:
         model = Payment
@@ -72,30 +87,32 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class GuestSerializer(serializers.ModelSerializer):
-    user_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(),
-        source='user'
-    )
-    placement_id = serializers.PrimaryKeyRelatedField(
-        queryset=Placement.objects.all(),
-        source='placement'
-    )
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+    placement = serializers.PrimaryKeyRelatedField(queryset=Placement.objects.all())
 
     class Meta:
         model = Guest
         fields = '__all__'
 
+
 class RegisterSerializer(serializers.ModelSerializer):
+    phone = serializers.CharField(write_only=True, required=True)
+
     class Meta:
         model = User
-        fields = ['username', 'password']
+        fields = ['username', 'password', 'email', 'phone']
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
+        phone = validated_data.pop('phone')
         user = User.objects.create_user(**validated_data)
+
+        user.profile.phone = phone
+        user.profile.save()
         return user
 
-
-class RegisterViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
-    serializer_class = RegisterSerializer
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        token, created = Token.objects.get_or_create(user=instance)
+        ret['token'] = token.key
+        return ret

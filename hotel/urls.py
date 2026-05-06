@@ -12,7 +12,7 @@ from .views import (
     BookingViewSet,
     PlacementViewSet,
     PaymentViewSet,
-    GuestViewSet,
+    GuestViewSet, RegisterViewSet,
 )
 
 router = DefaultRouter()
@@ -20,9 +20,10 @@ router = DefaultRouter()
 router.register(r'categories', CategoryViewSet)
 router.register(r'rooms', RoomViewSet)
 router.register(r'profiles', ProfileViewSet)
-router.register(r'bookings', BookingViewSet)
-router.register(r'placements', PlacementViewSet)
-router.register(r'payments', PaymentViewSet)
+router.register(r'bookings', BookingViewSet, basename='booking')
+router.register(r'placements', PlacementViewSet, basename='placement')
+router.register(r'payments', PaymentViewSet, basename='payment')
+router.register(r'register', RegisterViewSet, basename='register')
 router.register(r'guests', GuestViewSet)
 
 urlpatterns = [
