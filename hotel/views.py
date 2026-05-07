@@ -82,64 +82,100 @@ class BookingViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.profile.role in ['admin', 'staff']:
-            return Booking.objects.all()
-        return Booking.objects.filter(user=self.request.user)
+        return Booking.objects.filter(
+            user=self.request.user
+        ).order_by('-id')
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+
+        user = self.request.user
+        check_in = serializer.validated_data['check_in_date']
+        check_out = serializer.validated_data['check_out_date']
+
+        # ❗ защита от дублей
+        exists = Booking.objects.filter(
+            user=user,
+            check_in_date=check_in,
+            check_out_date=check_out,
+            status='pending'
+        ).exists()
+
+        if exists:
+            raise ValidationError("У вас уже есть бронь на эти даты")
+
+        serializer.save(user=user)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+
+        booking = self.get_object()
+
+        if booking.status == 'canceled':
+            return Response({"detail": "Already canceled"})
+
+        booking.status = 'canceled'
+        booking.save()
+
+        return Response({"status": "canceled"})
 
 
 class PlacementViewSet(viewsets.ModelViewSet):
     queryset = Placement.objects.all()
     serializer_class = PlacementSerializer
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsStaffOrAdmin()]
-        return [permissions.IsAuthenticated()]
+    permission_classes = [IsStaffOrAdmin]
 
     def get_queryset(self):
-        if self.request.user.profile.role in ['admin', 'staff']:
-            return Placement.objects.all()
-        return Placement.objects.filter(booking__user=self.request.user)
+        return Placement.objects.all()
 
     def perform_create(self, serializer):
+
         room = serializer.validated_data['room']
         check_in = serializer.validated_data['check_in_date']
         check_out = serializer.validated_data['check_out_date']
 
-        days = (check_out - check_in).days
-        price_per_night = room.price
+        # проверка пересечений
+        overlap = Placement.objects.filter(
+            room=room,
+            check_in_date__lt=check_out,
+            check_out_date__gt=check_in,
+            status__in=['waiting', 'active']
+        ).exists()
 
-        placement = serializer.save(price_per_night=price_per_night)
+        if overlap:
+            raise ValidationError("Room already booked")
+
+        days = (check_out - check_in).days
+        price = room.price * days
+
+        placement = serializer.save(price_per_night=room.price)
 
         booking = placement.booking
-        booking.total_price += (days * price_per_night)
+        booking.total_price = price
         booking.save()
 
     def perform_update(self, serializer):
-        status_before = self.get_object().status
-        status_after = serializer.validated_data.get('status', status_before)
-        booking = self.get_object().booking
 
-        if status_before == 'waiting' and status_after == 'active':
-            if booking.status != 'confirmed':
-                raise ValidationError({"error": "Заселение невозможно: бронирование не подтверждено."})
+        placement = self.get_object()
+        status_before = placement.status
 
-        placement = serializer.save()
+        instance = serializer.save()
 
-        if placement.status == 'active' and not placement.check_in_fact:
-            placement.check_in_fact = timezone.now()
-            placement.room.status = 'occupied'
-            placement.room.save()
+        # заселение
+        if status_before == 'waiting' and instance.status == 'active':
+            if instance.booking.status != 'confirmed':
+                raise ValidationError("Booking not confirmed")
 
-        if placement.status == 'finished' and not placement.check_out_fact:
-            placement.check_out_fact = timezone.now()
-            placement.room.status = 'maintenance'
-            placement.room.save()
+            instance.check_in_fact = timezone.now()
+            instance.room.status = 'occupied'
+            instance.room.save()
 
-        placement.save()
+        # выселение
+        if instance.status == 'finished':
+            instance.check_out_fact = timezone.now()
+            instance.room.status = 'maintenance'
+            instance.room.save()
+
+        instance.save()
 
 
 class PaymentViewSet(viewsets.ModelViewSet):

@@ -8,4 +8,3 @@ from rest_framework.authtoken.models import Token
 def create_profile_and_token(sender, instance, created, **kwargs):
     if created:
         Profile.objects.create(user=instance)
-        Token.objects.create(user=instance)

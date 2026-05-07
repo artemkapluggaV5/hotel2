@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
 
 from .models import *
 
@@ -105,14 +104,14 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         phone = validated_data.pop('phone')
-        user = User.objects.create_user(**validated_data)
+        password = validated_data.pop('password')
+
+        user = User.objects.create_user(
+            password=password,
+            **validated_data
+        )
 
         user.profile.phone = phone
         user.profile.save()
-        return user
 
-    def to_representation(self, instance):
-        ret = super().to_representation(instance)
-        token, created = Token.objects.get_or_create(user=instance)
-        ret['token'] = token.key
-        return ret
+        return user
