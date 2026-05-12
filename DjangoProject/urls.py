@@ -16,8 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from rest_framework.authtoken.views import obtain_auth_token
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('hotel.urls')),
+    path('api/', include('users.urls')),  # ПУТИ ДЛЯ РЕГИСТРАЦИИ (Проверь эту строку!)
+    path('api/login/', obtain_auth_token),  # Путь для входа
 ]

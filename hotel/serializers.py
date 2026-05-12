@@ -1,14 +1,14 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
-
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import get_user_model
 from .models import *
 
+User = get_user_model()
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = '__all__'
-
 
 class RoomSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
@@ -20,14 +20,6 @@ class RoomSerializer(serializers.ModelSerializer):
             'amenities', 'features', 'description',
             'rating', 'rules', 'status'
         ]
-
-
-class ProfileSerializer(serializers.ModelSerializer):
-    user = serializers.PrimaryKeyRelatedField(read_only=True)
-
-    class Meta:
-        model = Profile
-        fields = '__all__'
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -43,10 +35,23 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only_fields = ['booking_date', 'total_price']
 
     def validate(self, data):
-        if data['check_out_date'] <= data['check_in_date']:
-            raise serializers.ValidationError("Check-out date must be after check-in date.")
-        return data
+        # 1. Берем новые даты из запроса, если они есть.
+        # Если их нет (как при PATCH), берем старые даты из существующей записи (self.instance)
+        check_in = data.get('check_in_date')
+        check_out = data.get('check_out_date')
 
+        if self.instance:
+            if not check_in:
+                check_in = self.instance.check_in_date
+            if not check_out:
+                check_out = self.instance.check_out_date
+
+        # 2. Проверяем даты только если обе даты у нас на руках
+        if check_in and check_out:
+            if check_out <= check_in:
+                raise serializers.ValidationError("Дата выезда должна быть позже даты заезда.")
+
+        return data
 
 class PlacementSerializer(serializers.ModelSerializer):
     room = serializers.PrimaryKeyRelatedField(queryset=Room.objects.all())
@@ -76,14 +81,12 @@ class PlacementSerializer(serializers.ModelSerializer):
 
         return data
 
-
 class PaymentSerializer(serializers.ModelSerializer):
     booking = serializers.PrimaryKeyRelatedField(queryset=Booking.objects.all())
 
     class Meta:
         model = Payment
         fields = '__all__'
-
 
 class GuestSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
@@ -92,26 +95,3 @@ class GuestSerializer(serializers.ModelSerializer):
     class Meta:
         model = Guest
         fields = '__all__'
-
-
-class RegisterSerializer(serializers.ModelSerializer):
-    phone = serializers.CharField(write_only=True, required=True)
-
-    class Meta:
-        model = User
-        fields = ['username', 'password', 'email', 'phone']
-        extra_kwargs = {'password': {'write_only': True}}
-
-    def create(self, validated_data):
-        phone = validated_data.pop('phone')
-        password = validated_data.pop('password')
-
-        user = User.objects.create_user(
-            password=password,
-            **validated_data
-        )
-
-        user.profile.phone = phone
-        user.profile.save()
-
-        return user

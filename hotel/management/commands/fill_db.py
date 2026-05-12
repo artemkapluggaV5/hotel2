@@ -1,18 +1,21 @@
 import random
 from django.core.management.base import BaseCommand
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from faker import Faker
 from hotel.models import Category, Room
 
+# Получаем нашу текущую модель пользователя (которую мы указали в settings.py)
+User = get_user_model()
 
 class Command(BaseCommand):
     help = 'Заполняет базу данных фейковыми категориями и номерами'
 
     def handle(self, *args, **kwargs):
-        # Используем русскую локализацию для реалистичных данных
+        # Используем русскую локализацию
         fake = Faker('ru_RU')
 
-        self.stdout.write('Удаляем старые данные (чтобы не было дублей)...')
+        self.stdout.write('Удаляем старые данные...')
+        # Сначала удаляем комнаты, потом категории (из-за связей ForeignKey)
         Room.objects.all().delete()
         Category.objects.all().delete()
 
@@ -32,13 +35,12 @@ class Command(BaseCommand):
         self.stdout.write('Создаем номера...')
         amenities_list = ['Wi-Fi', 'Кондиционер', 'Мини-бар', 'ТВ', 'Сейф', 'Фен', 'Джакузи', 'Балкон']
 
-        for _ in range(25):  # Создаем 25 номеров
+        for _ in range(25):
             cat = random.choice(categories)
-            # Берем базовую цену категории и добавляем случайную наценку
             room_price = cat.base_price + round(random.uniform(0, 1000), 2)
 
             Room.objects.create(
-                room_number=str(fake.unique.random_int(min=100, max=999)),  # Уникальный номер
+                room_number=str(fake.unique.random_int(min=100, max=999)),
                 category=cat,
                 price=room_price,
                 amenities=", ".join(random.sample(amenities_list, k=random.randint(2, 5))),
@@ -49,10 +51,16 @@ class Command(BaseCommand):
                 status=random.choice(['available', 'available', 'available', 'occupied', 'maintenance'])
             )
 
+        self.stdout.write('Проверка суперпользователя...')
         if not User.objects.filter(username='admin').exists():
-            admin = User.objects.create_superuser('admin', 'admin@mail.ru', 'admin')
-            admin.profile.role = 'admin'
-            admin.profile.save()
-            self.stdout.write('Создан суперпользователь: логин "admin", пароль "admin"')
+            # Создаем админа напрямую через модель User
+            User.objects.create_superuser(
+                username='admin',
+                email='admin@hotel.com',
+                password='admin',
+                role='admin',   # Поле из нашей новой модели
+                phone='+70000000000'
+            )
+            self.stdout.write(self.style.SUCCESS('Создан суперпользователь: admin / admin'))
 
-        self.stdout.write(self.style.SUCCESS('✅ База успешно заполнена! Создано 5 категорий и 25 номеров.'))
+        self.stdout.write(self.style.SUCCESS('✅ База успешно заполнена!'))

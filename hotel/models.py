@@ -1,19 +1,7 @@
 from django.db import models
-from django.contrib.auth.models import User
 
-class Profile(models.Model):
-    ROLE_CHOICES = [
-        ('guest', 'Guest'),
-        ('admin', 'Admin'),
-        ('staff', 'Staff'),
-    ]
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    phone = models.CharField(max_length=20)
-    passport_data = models.CharField(max_length=100, blank=True, null=True)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='guest')
+from users.models import User
 
-    def __str__(self):
-        return self.user.username
 
 class Category(models.Model):
     name = models.CharField(max_length=50, unique=True)
@@ -54,7 +42,7 @@ class Booking(models.Model):
     check_out_date = models.DateField()
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending')
     booking_date = models.DateTimeField(auto_now_add=True)
-    total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0) # Добавил default=0
+    total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
         return f"Booking #{self.id}"
