@@ -81,7 +81,6 @@ class PlacementViewSet(viewsets.ModelViewSet):
     serializer_class = PlacementSerializer
 
     def get_permissions(self):
-        # 1. РАЗРЕШАЕМ 'create' всем авторизованным (чтобы Гость мог бронировать)
         if self.action == 'create':
             return [permissions.IsAuthenticated()]
 

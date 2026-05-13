@@ -12,7 +12,6 @@ class RegisterViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
-# ДОБАВИЛИ ЭТОТ КЛАСС:
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 

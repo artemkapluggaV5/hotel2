@@ -2,6 +2,7 @@ from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import get_user_model
 from .models import *
+from datetime import date
 
 User = get_user_model()
 
@@ -21,7 +22,6 @@ class RoomSerializer(serializers.ModelSerializer):
             'rating', 'rules', 'status'
         ]
 
-
 class BookingSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
 
@@ -35,10 +35,9 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only_fields = ['booking_date', 'total_price']
 
     def validate(self, data):
-        # 1. Берем новые даты из запроса, если они есть.
-        # Если их нет (как при PATCH), берем старые даты из существующей записи (self.instance)
         check_in = data.get('check_in_date')
         check_out = data.get('check_out_date')
+        today = date.today()
 
         if self.instance:
             if not check_in:
@@ -46,10 +45,12 @@ class BookingSerializer(serializers.ModelSerializer):
             if not check_out:
                 check_out = self.instance.check_out_date
 
-        # 2. Проверяем даты только если обе даты у нас на руках
+        if not self.instance and check_in and check_in < today:
+            raise serializers.ValidationError({"check_in_date": "Нельзя забронировать номер на прошедшую дату."})
+
         if check_in and check_out:
             if check_out <= check_in:
-                raise serializers.ValidationError("Дата выезда должна быть позже даты заезда.")
+                raise serializers.ValidationError({"check_out_date": "Дата выезда должна быть позже даты заезда."})
 
         return data
 
@@ -63,9 +64,19 @@ class PlacementSerializer(serializers.ModelSerializer):
         read_only_fields = ['price_per_night']
 
     def validate(self, data):
-        room = data['room']
-        check_in = data['check_in_date']
-        check_out = data['check_out_date']
+        room = data.get('room')
+        check_in = data.get('check_in_date')
+        check_out = data.get('check_out_date')
+        today = date.today()
+
+        # Если PATCH запрос
+        if self.instance:
+            room = room or self.instance.room
+            check_in = check_in or self.instance.check_in_date
+            check_out = check_out or self.instance.check_out_date
+
+        if not self.instance and check_in and check_in < today:
+            raise serializers.ValidationError({"check_in_date": "Дата заезда не может быть в прошлом."})
 
         overlapping = Placement.objects.filter(
             room=room,
@@ -77,7 +88,7 @@ class PlacementSerializer(serializers.ModelSerializer):
             overlapping = overlapping.exclude(id=self.instance.id)
 
         if overlapping.exists():
-            raise serializers.ValidationError({"room": "Room is already booked for these dates."})
+            raise serializers.ValidationError({"room": "Этот номер уже забронирован на выбранные даты."})
 
         return data
 
