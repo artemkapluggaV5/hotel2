@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from .models import *
 from .serializers import *
 from .permissions import IsAdmin, IsStaffOrAdmin, IsGuest
+from rest_framework.views import APIView
 
 User = get_user_model()
 
@@ -66,11 +67,9 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # Проверяем, авторизован ли юзер и есть ли у него роль
-        if user.is_authenticated and hasattr(user, 'role'):
-            if user.role in ['admin', 'staff']:
-                return Booking.objects.all()
-            return Booking.objects.filter(user=user)
+        if user.role in ['admin', 'staff'] and self.request.query_params.get('all') == 'true':
+            return Booking.objects.all()
+        return Booking.objects.filter(user=user)
         return Booking.objects.none()
 
     def perform_create(self, serializer):
@@ -85,9 +84,11 @@ class PlacementViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        if self.request.user.role in ['admin', 'staff']:
+        user = self.request.user
+        if user.role in ['admin', 'staff'] and self.request.query_params.get('all') == 'true':
             return Placement.objects.all()
-        return Placement.objects.filter(booking__user=self.request.user)
+
+        return Placement.objects.filter(booking__user=user)
 
     def perform_create(self, serializer):
         room = serializer.validated_data['room']
@@ -139,3 +140,24 @@ class GuestViewSet(viewsets.ModelViewSet):
     queryset = Guest.objects.all()
     serializer_class = GuestSerializer
     permission_classes = [IsStaffOrAdmin]
+
+
+class HotelStatsView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        total_rooms = Room.objects.count()
+        available_rooms = Room.objects.filter(status='available').count()
+        occupied_rooms = Room.objects.filter(status='occupied').count()
+        maintenance_rooms = Room.objects.filter(status='maintenance').count()
+
+        total_revenue = Booking.objects.filter(status='confirmed').aggregate(models.Sum('total_price'))[
+                            'total_price__sum'] or 0
+
+        return Response({
+            "total_rooms": total_rooms,
+            "available_rooms": available_rooms,
+            "occupied_rooms": occupied_rooms,
+            "maintenance_rooms": maintenance_rooms,
+            "total_revenue": total_revenue
+        })

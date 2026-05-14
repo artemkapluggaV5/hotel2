@@ -13,4 +13,5 @@ router.register(r'guests', GuestViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('stats/', HotelStatsView.as_view(), name='hotel-stats'),
 ]
