@@ -1,10 +1,11 @@
 from django.db import models
-
 from users.models import User
+from autoslug import AutoSlugField
 
 
 class Category(models.Model):
     name = models.CharField(max_length=50, unique=True)
+    slug = AutoSlugField(populate_from='name', unique=True, always_update=True)
     description = models.CharField(max_length=255, blank=True, null=True)
     max_guests = models.PositiveIntegerField()
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -19,6 +20,7 @@ class Room(models.Model):
         ('maintenance', 'Maintenance'),
     ]
     room_number = models.CharField(max_length=10, unique=True)
+    image = models.ImageField(upload_to='rooms/', null=True, blank=True, verbose_name="Изображение номера")
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='rooms')
     price = models.DecimalField(max_digits=10, decimal_places=2)
     amenities = models.TextField(blank=True, null=True)
