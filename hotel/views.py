@@ -70,7 +70,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         if user.role in ['admin', 'staff'] and self.request.query_params.get('all') == 'true':
             return Booking.objects.all()
         return Booking.objects.filter(user=user)
-        return Booking.objects.none()
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

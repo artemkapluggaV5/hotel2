@@ -12,6 +12,7 @@ class RegisterViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
+
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -22,3 +23,15 @@ class UserInfoView(APIView):
             "phone": request.user.phone,
             "role": request.user.role
         })
+
+    def patch(self, request):
+        user = request.user
+
+        if 'email' in request.data:
+            user.email = request.data['email']
+
+        if 'phone' in request.data:
+            user.phone = request.data['phone']
+
+        user.save()
+        return Response({"message": "Профиль успешно обновлен!"})
