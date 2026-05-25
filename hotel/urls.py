@@ -14,4 +14,6 @@ router.register(r'guests', GuestViewSet)
 urlpatterns = [
     path('', include(router.urls)),
     path('stats/', HotelStatsView.as_view(), name='hotel-stats'),
+    path('pay/', CreateYooKassaPaymentView.as_view(), name='yookassa-pay'),
+    path('pay/check/', CheckPaymentStatusView.as_view(), name='yookassa-check'),
 ]

@@ -1,3 +1,7 @@
+import random
+
+from django.conf import settings
+from django.core.mail import send_mail
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import get_user_model
@@ -9,10 +13,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['username', 'password', 'email', 'full_name', 'phone']
-        extra_kwargs = {
-            'password': {'write_only': True},
-            'email': {'required': True}
-        }
+        extra_kwargs = {'password': {'write_only': True}}
 
     def validate_username(self, value):
         if not re.fullmatch(r'[A-Za-z0-9]+', value):
@@ -41,7 +42,22 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        code = str(random.randint(100000, 999999))
+
+        user = User.objects.create_user(
+            **validated_data,
+            is_active=False,
+            verification_code=code
+        )
+
+        send_mail(
+            subject='OASIS Hotel: Код подтверждения',
+            message=f'Здравствуйте, {user.username}!\n\nВаш код подтверждения для завершения регистрации: {code}',
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        return user
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)

@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
+from django.conf.global_settings import DEFAULT_FROM_EMAIL
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -147,3 +149,16 @@ AUTH_USER_MODEL = 'users.User'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
+EMAIL_HOST_USER = 'artem684271@gmail.com'
+EMAIL_HOST_PASSWORD = 'zcbwtofkrsqobwbs'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+
+YOOKASSA_SHOP_ID = 'твой_shop_id' # Например: '345678'
+YOOKASSA_SECRET_KEY = 'твой_секретный_ключ' # Например: 'test_XXXXXXX'

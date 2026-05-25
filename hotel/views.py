@@ -1,9 +1,11 @@
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q
 from rest_framework import viewsets, mixins, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
+from yookassa import Configuration, Payment as YooPayment
 from django.contrib.auth import get_user_model
 from .models import *
 from .serializers import *
@@ -160,3 +162,79 @@ class HotelStatsView(APIView):
             "maintenance_rooms": maintenance_rooms,
             "total_revenue": total_revenue
         })
+
+
+Configuration.account_id = settings.YOOKASSA_SHOP_ID
+Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+
+
+class CreateYooKassaPaymentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        booking_id = request.data.get('booking_id')
+        try:
+            booking = Booking.objects.get(id=booking_id, user=request.user, status='pending')
+        except Booking.DoesNotExist:
+            return Response({"error": "Бронь не найдена или уже оплачена"}, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. АТОМАРНОСТЬ: Создаем платеж в нашей БД и в ЮKassa
+        with transaction.atomic():
+            # Ключ идемпотентности (гарантирует, что платеж не создастся дважды)
+            idempotence_key = str(uuid.uuid4())
+
+            # Создаем платеж в ЮKassa
+            yookassa_payment = YooPayment.create({
+                "amount": {
+                    "value": str(booking.total_price),
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": "http://localhost:5173/account"  # Куда вернуть юзера после оплаты
+                },
+                "capture": True,
+                "description": f"Оплата бронирования №{booking.id} в OASIS Hotel"
+            }, idempotence_key)
+
+            # Сохраняем в нашу БД со статусом "pending"
+            our_payment = Payment.objects.create(
+                booking=booking,
+                amount=booking.total_price,
+                yookassa_payment_id=yookassa_payment.id,
+                status='pending'
+            )
+
+        # Отдаем ссылку на оплату на фронтенд
+        return Response({"confirmation_url": yookassa_payment.confirmation.confirmation_url})
+
+
+class CheckPaymentStatusView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        booking_id = request.data.get('booking_id')
+        try:
+            payment = Payment.objects.get(booking__id=booking_id, status='pending')
+        except Payment.DoesNotExist:
+            return Response({"message": "Нет ожидающих платежей"})
+
+        yookassa_payment = YooPayment.find_one(payment.yookassa_payment_id)
+
+        if yookassa_payment.status == 'succeeded':
+            with transaction.atomic():
+                payment.status = 'paid'
+                payment.save()
+
+                booking = payment.booking
+                booking.status = 'confirmed'
+                booking.save()
+
+            return Response({"status": "success", "message": "Оплата прошла успешно!"})
+
+        elif yookassa_payment.status == 'canceled':
+            payment.status = 'canceled'
+            payment.save()
+            return Response({"status": "canceled", "message": "Платеж отменен"})
+
+        return Response({"status": "pending", "message": "Оплата еще не поступила"})

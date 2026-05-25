@@ -83,16 +83,20 @@ class Placement(models.Model):
     def __str__(self):
         return f"Размещение в {self.room} по брони #{self.booking.id}"
 
+
 class Payment(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Ожидание'),
         ('paid', 'Оплачено'),
-        ('failed', 'Ошибка'),
+        ('canceled', 'Отменено'),
     ]
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='payments', verbose_name='Бронь')
     amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='Сумма')
+
+    yookassa_payment_id = models.CharField(max_length=255, null=True, blank=True, verbose_name='ID платежа ЮKassa')
+
     payment_date = models.DateTimeField(auto_now_add=True, verbose_name='Дата оплаты')
-    payment_type = models.CharField(max_length=50, verbose_name='Способ оплаты')
+    payment_type = models.CharField(max_length=50, default='yookassa', verbose_name='Способ оплаты')
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending', verbose_name='Статус')
 
     class Meta:
