@@ -8,6 +8,7 @@ from rest_framework.exceptions import ValidationError
 from yookassa import Configuration, Payment as YooPayment
 from django.contrib.auth import get_user_model
 from .models import *
+import uuid
 from .serializers import *
 from .permissions import IsAdmin, IsStaffOrAdmin, IsGuest
 from rest_framework.views import APIView

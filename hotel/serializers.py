@@ -22,17 +22,33 @@ class RoomSerializer(serializers.ModelSerializer):
             'rating', 'rules', 'status'
         ]
 
+
+class BookingRoomSerializer(serializers.ModelSerializer):
+    # Теперь мы передаем еще и ID комнаты, чтобы React мог его сравнить
+    room_id = serializers.IntegerField(source='room.id', read_only=True)
+    room_number = serializers.CharField(source='room.room_number', read_only=True)
+    category_name = serializers.CharField(source='room.category.name', read_only=True)
+
+    class Meta:
+        model = Placement
+        fields = ['room_id', 'room_number', 'category_name'] # Добавили room_id
+
+
 class BookingSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # СТАЛО: автоматически подтягиваем список номеров из связанных размещений (placements)
+    rooms = BookingRoomSerializer(source='placements', many=True, read_only=True)
 
     class Meta:
         model = Booking
         fields = [
             'id', 'user',
             'check_in_date', 'check_out_date',
-            'status', 'booking_date', 'total_price'
+            'status', 'booking_date', 'total_price',
+            'rooms'  # <-- ДОБАВИЛИ ПОЛЕ КАРТИНКИ И НОМЕРА
         ]
-        read_only_fields = ['booking_date', 'total_price']
+        read_only_fields = ['booking_date', 'total_price', 'rooms']
 
     def validate(self, data):
         check_in = data.get('check_in_date')
@@ -44,6 +60,16 @@ class BookingSerializer(serializers.ModelSerializer):
                 check_in = self.instance.check_in_date
             if not check_out:
                 check_out = self.instance.check_out_date
+
+        # --- ЗАЩИТА ОТ СПАМА (ОДНА НЕОПЛАЧЕННАЯ БРОНЬ В РУКИ) ---
+        request = self.context.get('request')
+        if request and request.user and not self.instance:
+            # Проверяем, есть ли уже у этого юзера хоть одна неоплаченная бронь
+            has_pending = Booking.objects.filter(user=request.user, status='pending').exists()
+            if has_pending:
+                raise serializers.ValidationError(
+                    "У вас уже есть неоплаченное бронирование. Пожалуйста, оплатите его или отмените в Личном кабинете."
+                )
 
         if not self.instance and check_in and check_in < today:
             raise serializers.ValidationError({"check_in_date": "Нельзя забронировать номер на прошедшую дату."})
@@ -69,7 +95,6 @@ class PlacementSerializer(serializers.ModelSerializer):
         check_out = data.get('check_out_date')
         today = date.today()
 
-        # Если PATCH запрос
         if self.instance:
             room = room or self.instance.room
             check_in = check_in or self.instance.check_in_date
@@ -78,12 +103,20 @@ class PlacementSerializer(serializers.ModelSerializer):
         if not self.instance and check_in and check_in < today:
             raise serializers.ValidationError({"check_in_date": "Дата заезда не может быть в прошлом."})
 
+        # --- ИСПРАВЛЕННАЯ ПРОВЕРКА ЗАНЯТОСТИ ---
+        # Ищем пересечения, НО ИГНОРИРУЕМ отмененные брони и завершенные проживания
         overlapping = Placement.objects.filter(
             room=room,
             check_in_date__lt=check_out,
-            check_out_date__gt=check_in,
-            status__in=['waiting', 'active']
+            check_out_date__gt=check_in
+        ).exclude(
+            # Исключаем, если само размещение отменено ИЛИ завершено
+            status__in=['canceled', 'finished']
+        ).exclude(
+            # Исключаем, если вся бронь целиком была отменена
+            booking__status='canceled'
         )
+
         if self.instance:
             overlapping = overlapping.exclude(id=self.instance.id)
 

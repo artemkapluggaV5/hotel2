@@ -160,5 +160,5 @@ EMAIL_HOST_PASSWORD = 'zcbwtofkrsqobwbs'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 
-YOOKASSA_SHOP_ID = 'твой_shop_id' # Например: '345678'
-YOOKASSA_SECRET_KEY = 'твой_секретный_ключ' # Например: 'test_XXXXXXX'
+YOOKASSA_SHOP_ID = '1305307'
+YOOKASSA_SECRET_KEY = 'test_Gvf9reEgzw9GF_24Sn3tutuNxSX5q4ODJc9VfbWar14'
