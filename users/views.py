@@ -22,20 +22,17 @@ class UserInfoView(APIView):
             "username": request.user.username,
             "email": request.user.email,
             "phone": request.user.phone,
-            "role": request.user.role
+            "role": request.user.role,
+            "telegram_id": request.user.telegram_id  # Добавили
         })
 
     def patch(self, request):
         user = request.user
-
-        if 'email' in request.data:
-            user.email = request.data['email']
-
-        if 'phone' in request.data:
-            user.phone = request.data['phone']
-
+        if 'email' in request.data: user.email = request.data['email']
+        if 'phone' in request.data: user.phone = request.data['phone']
+        if 'telegram_id' in request.data: user.telegram_id = request.data['telegram_id']  # Добавили
         user.save()
-        return Response({"message": "Профиль успешно обновлен!"})
+        return Response({"message": "Профиль обновлен"})
 
 
 class VerifyEmailView(APIView):

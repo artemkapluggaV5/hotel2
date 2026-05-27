@@ -12,6 +12,7 @@ class User(AbstractUser):
     passport_data = models.CharField(max_length=100, blank=True, null=True, verbose_name='Паспортные данные')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='guest', verbose_name='Роль')
     verification_code = models.CharField(max_length=6, blank=True, null=True)
+    telegram_id = models.CharField(max_length=50, blank=True, null=True, verbose_name='Telegram ID')
 
     class Meta:
         verbose_name = 'Пользователь'

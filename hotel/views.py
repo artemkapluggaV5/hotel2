@@ -1,11 +1,12 @@
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q
-from rest_framework import viewsets, mixins, permissions
+from rest_framework import viewsets, mixins, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from yookassa import Configuration, Payment as YooPayment
+from .telegram import send_telegram_message
 from django.contrib.auth import get_user_model
 from .models import *
 import uuid
@@ -230,6 +231,21 @@ class CheckPaymentStatusView(APIView):
                 booking = payment.booking
                 booking.status = 'confirmed'
                 booking.save()
+
+            # --- МАГИЯ ТЕЛЕГРАМА ---
+            # Получаем юзера, который бронировал
+            user = booking.user
+            if user.telegram_id:
+                msg = (
+                    f"🎉 <b>Оплата прошла успешно!</b>\n\n"
+                    f"🏨 Бронирование <b>№{booking.id}</b> подтверждено.\n"
+                    f"📅 Заезд: {booking.check_in_date}\n"
+                    f"📅 Выезд: {booking.check_out_date}\n"
+                    f"💰 Оплачено: {payment.amount} ₽\n\n"
+                    f"Ждем вас в OASIS Hotel!"
+                )
+                send_telegram_message(user.telegram_id, msg)
+            # ------------------------
 
             return Response({"status": "success", "message": "Оплата прошла успешно!"})
 
