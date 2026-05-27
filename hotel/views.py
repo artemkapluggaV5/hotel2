@@ -216,15 +216,26 @@ class CheckPaymentStatusView(APIView):
 
     def post(self, request):
         booking_id = request.data.get('booking_id')
-        try:
-            payment = Payment.objects.get(booking__id=booking_id, status='pending')
-        except Payment.DoesNotExist:
-            return Response({"message": "Нет ожидающих платежей"})
 
-        yookassa_payment = YooPayment.find_one(payment.yookassa_payment_id)
+        # 1. Запускаем атомарную транзакцию
+        with transaction.atomic():
+            try:
+                # ИСПОЛЬЗУЕМ select_for_update().
+                # Это заблокирует строку в Postgres, защитив нас от дублирования!
+                payment = Payment.objects.select_for_update().get(booking__id=booking_id, status='pending')
+            except Payment.DoesNotExist:
+                # Если второй параллельный запрос дошел сюда, он уже не найдет 'pending' и просто выйдет
+                return Response({"message": "Оплата уже обработана другим запросом."})
 
-        if yookassa_payment.status == 'succeeded':
-            with transaction.atomic():
+            # 2. Если мы успешно заблокировали строку, спрашиваем статус у ЮKassa
+            try:
+                yookassa_payment = YooPayment.find_one(payment.yookassa_payment_id)
+            except Exception as e:
+                print(f"Ошибка связи с ЮKassa: {e}")
+                return Response({"error": "Ошибка связи"}, status=500)
+
+            # 3. Если статус "успешно"
+            if yookassa_payment.status == 'succeeded':
                 payment.status = 'paid'
                 payment.save()
 
@@ -232,26 +243,24 @@ class CheckPaymentStatusView(APIView):
                 booking.status = 'confirmed'
                 booking.save()
 
-            # --- МАГИЯ ТЕЛЕГРАМА ---
-            # Получаем юзера, который бронировал
-            user = booking.user
-            if user.telegram_id:
-                msg = (
-                    f"🎉 <b>Оплата прошла успешно!</b>\n\n"
-                    f"🏨 Бронирование <b>№{booking.id}</b> подтверждено.\n"
-                    f"📅 Заезд: {booking.check_in_date}\n"
-                    f"📅 Выезд: {booking.check_out_date}\n"
-                    f"💰 Оплачено: {payment.amount} ₽\n\n"
-                    f"Ждем вас в OASIS Hotel!"
-                )
-                send_telegram_message(user.telegram_id, msg)
-            # ------------------------
+                # ОТПРАВЛЯЕМ ТЕЛЕГРАМ СТРОГО ОДИН РАЗ ВНУТРИ БЛОКИРОВКИ
+                user = booking.user
+                if user.telegram_id:
+                    msg = (
+                        f"🎉 <b>Оплата прошла успешно!</b>\n\n"
+                        f"🏨 Бронирование <b>№{booking.id}</b> подтверждено.\n"
+                        f"📅 Заезд: {booking.check_in_date}\n"
+                        f"📅 Выезд: {booking.check_out_date}\n"
+                        f"💰 Оплачено: {payment.amount} ₽\n\n"
+                        f"Ждем вас в OASIS Hotel!"
+                    )
+                    send_telegram_message(user.telegram_id, msg)
 
-            return Response({"status": "success", "message": "Оплата прошла успешно!"})
+                return Response({"status": "success", "message": "Оплата прошла успешно!"})
 
-        elif yookassa_payment.status == 'canceled':
-            payment.status = 'canceled'
-            payment.save()
-            return Response({"status": "canceled", "message": "Платеж отменен"})
+            elif yookassa_payment.status == 'canceled':
+                payment.status = 'canceled'
+                payment.save()
+                return Response({"status": "canceled", "message": "Платеж отменен"})
 
-        return Response({"status": "pending", "message": "Оплата еще не поступила"})
+            return Response({"status": "pending", "message": "Оплата еще не поступила"})
