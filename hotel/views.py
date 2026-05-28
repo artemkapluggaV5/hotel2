@@ -180,12 +180,9 @@ class CreateYooKassaPaymentView(APIView):
         except Booking.DoesNotExist:
             return Response({"error": "Бронь не найдена или уже оплачена"}, status=status.HTTP_404_NOT_FOUND)
 
-        # 1. АТОМАРНОСТЬ: Создаем платеж в нашей БД и в ЮKassa
         with transaction.atomic():
-            # Ключ идемпотентности (гарантирует, что платеж не создастся дважды)
             idempotence_key = str(uuid.uuid4())
 
-            # Создаем платеж в ЮKassa
             yookassa_payment = YooPayment.create({
                 "amount": {
                     "value": str(booking.total_price),
@@ -193,13 +190,12 @@ class CreateYooKassaPaymentView(APIView):
                 },
                 "confirmation": {
                     "type": "redirect",
-                    "return_url": "http://localhost:5173/account"  # Куда вернуть юзера после оплаты
+                    "return_url": "http://localhost:5173/account"
                 },
                 "capture": True,
                 "description": f"Оплата бронирования №{booking.id} в OASIS Hotel"
             }, idempotence_key)
 
-            # Сохраняем в нашу БД со статусом "pending"
             our_payment = Payment.objects.create(
                 booking=booking,
                 amount=booking.total_price,
@@ -207,7 +203,6 @@ class CreateYooKassaPaymentView(APIView):
                 status='pending'
             )
 
-        # Отдаем ссылку на оплату на фронтенд
         return Response({"confirmation_url": yookassa_payment.confirmation.confirmation_url})
 
 
@@ -217,24 +212,18 @@ class CheckPaymentStatusView(APIView):
     def post(self, request):
         booking_id = request.data.get('booking_id')
 
-        # 1. Запускаем атомарную транзакцию
         with transaction.atomic():
             try:
-                # ИСПОЛЬЗУЕМ select_for_update().
-                # Это заблокирует строку в Postgres, защитив нас от дублирования!
                 payment = Payment.objects.select_for_update().get(booking__id=booking_id, status='pending')
             except Payment.DoesNotExist:
-                # Если второй параллельный запрос дошел сюда, он уже не найдет 'pending' и просто выйдет
                 return Response({"message": "Оплата уже обработана другим запросом."})
 
-            # 2. Если мы успешно заблокировали строку, спрашиваем статус у ЮKassa
             try:
                 yookassa_payment = YooPayment.find_one(payment.yookassa_payment_id)
             except Exception as e:
                 print(f"Ошибка связи с ЮKassa: {e}")
                 return Response({"error": "Ошибка связи"}, status=500)
 
-            # 3. Если статус "успешно"
             if yookassa_payment.status == 'succeeded':
                 payment.status = 'paid'
                 payment.save()
@@ -243,12 +232,18 @@ class CheckPaymentStatusView(APIView):
                 booking.status = 'confirmed'
                 booking.save()
 
-                # ОТПРАВЛЯЕМ ТЕЛЕГРАМ СТРОГО ОДИН РАЗ ВНУТРИ БЛОКИРОВКИ
+                rooms_info = []
+                for placement in booking.placements.all():
+                    rooms_info.append(f"№{placement.room.room_number} ({placement.room.category.name})")
+
+                rooms_text = ", ".join(rooms_info) if rooms_info else "Не назначен"
+
                 user = booking.user
                 if user.telegram_id:
                     msg = (
                         f"🎉 <b>Оплата прошла успешно!</b>\n\n"
                         f"🏨 Бронирование <b>№{booking.id}</b> подтверждено.\n"
+                        f"🛏 <b>Номер:</b> {rooms_text}\n" 
                         f"📅 Заезд: {booking.check_in_date}\n"
                         f"📅 Выезд: {booking.check_out_date}\n"
                         f"💰 Оплачено: {payment.amount} ₽\n\n"

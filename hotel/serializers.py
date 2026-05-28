@@ -46,7 +46,7 @@ class BookingSerializer(serializers.ModelSerializer):
             'id', 'user',
             'check_in_date', 'check_out_date',
             'status', 'booking_date', 'total_price',
-            'rooms'  # <-- ДОБАВИЛИ ПОЛЕ КАРТИНКИ И НОМЕРА
+            'rooms'
         ]
         read_only_fields = ['booking_date', 'total_price', 'rooms']
 
@@ -61,10 +61,8 @@ class BookingSerializer(serializers.ModelSerializer):
             if not check_out:
                 check_out = self.instance.check_out_date
 
-        # --- ЗАЩИТА ОТ СПАМА (ОДНА НЕОПЛАЧЕННАЯ БРОНЬ В РУКИ) ---
         request = self.context.get('request')
         if request and request.user and not self.instance:
-            # Проверяем, есть ли уже у этого юзера хоть одна неоплаченная бронь
             has_pending = Booking.objects.filter(user=request.user, status='pending').exists()
             if has_pending:
                 raise serializers.ValidationError(
@@ -103,17 +101,13 @@ class PlacementSerializer(serializers.ModelSerializer):
         if not self.instance and check_in and check_in < today:
             raise serializers.ValidationError({"check_in_date": "Дата заезда не может быть в прошлом."})
 
-        # --- ИСПРАВЛЕННАЯ ПРОВЕРКА ЗАНЯТОСТИ ---
-        # Ищем пересечения, НО ИГНОРИРУЕМ отмененные брони и завершенные проживания
         overlapping = Placement.objects.filter(
             room=room,
             check_in_date__lt=check_out,
             check_out_date__gt=check_in
         ).exclude(
-            # Исключаем, если само размещение отменено ИЛИ завершено
             status__in=['canceled', 'finished']
         ).exclude(
-            # Исключаем, если вся бронь целиком была отменена
             booking__status='canceled'
         )
 
