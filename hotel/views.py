@@ -71,47 +71,73 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role in ['admin', 'staff'] and self.request.query_params.get('all') == 'true':
-            return Booking.objects.all()
-        return Booking.objects.filter(user=user)
+        if user.is_authenticated and hasattr(user, 'role'):
+            if user.role in ['admin', 'staff'] and self.request.query_params.get('all') == 'true':
+                return Booking.objects.all()
+            return Booking.objects.filter(user=user)
+        return Booking.objects.none()
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        status_before = self.get_object().status
+        booking = serializer.save()
+
+        if status_before == 'pending' and booking.status == 'canceled':
+            for placement in booking.placements.all():
+                placement.status = 'canceled'
+                placement.save()
+
+            pending_payments = Payment.objects.filter(booking=booking, status='pending')
+            for payment in pending_payments:
+                try:
+                    if payment.yookassa_payment_id:
+                        YooPayment.cancel(payment.yookassa_payment_id)
+                    payment.status = 'canceled'
+                    payment.save()
+                except Exception as e:
+                    print(f"Ошибка отмены в ЮKassa: {e}")
+
 
 class PlacementViewSet(viewsets.ModelViewSet):
     queryset = Placement.objects.all()
     serializer_class = PlacementSerializer
 
     def get_permissions(self):
+        # Если пытаются создать - разрешаем авторизованным
         if self.action == 'create':
             return [permissions.IsAuthenticated()]
+        # Если обновляют статус (заселение/выезд) - только персонал
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [IsStaffOrAdmin()]
+        # Если просто смотрят список - разрешаем всем авторизованным
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         user = self.request.user
-        if user.role in ['admin', 'staff'] and self.request.query_params.get('all') == 'true':
+
+        if not user.is_authenticated:
+            return Placement.objects.none()
+
+        if user.role in ['admin', 'staff']:
             return Placement.objects.all()
 
         return Placement.objects.filter(booking__user=user)
 
-    def perform_create(self, serializer):
-        room = serializer.validated_data['room']
-        check_in = serializer.validated_data['check_in_date']
-        check_out = serializer.validated_data['check_out_date']
-        days = (check_out - check_in).days
-        price_per_night = room.price
+    def partial_update(self, request, *args, **kwargs):
+        print("PATCH CALLED")
+        print("PK =", kwargs.get("pk"))
+        print("USER =", request.user)
 
-        placement = serializer.save(price_per_night=price_per_night)
-
-        booking = placement.booking
-        booking.total_price += (days * price_per_night)
-        booking.save()
+        return super().partial_update(request, *args, **kwargs)
 
     def perform_update(self, serializer):
+        # ... (весь твой код метода останется прежним) ...
         status_before = self.get_object().status
-        status_after = serializer.validated_data.get('status', status_before)
         booking = self.get_object().booking
 
-        if status_before == 'waiting' and status_after == 'active':
+        if status_before == 'waiting' and serializer.validated_data.get('status') == 'active':
             if booking.status != 'confirmed':
                 raise ValidationError({"error": "Заселение невозможно: бронирование не подтверждено."})
 
@@ -154,8 +180,7 @@ class HotelStatsView(APIView):
         occupied_rooms = Room.objects.filter(status='occupied').count()
         maintenance_rooms = Room.objects.filter(status='maintenance').count()
 
-        total_revenue = Booking.objects.filter(status='confirmed').aggregate(models.Sum('total_price'))[
-                            'total_price__sum'] or 0
+        total_revenue = Booking.objects.filter(status='confirmed').aggregate(models.Sum('total_price'))['total_price__sum'] or 0
 
         return Response({
             "total_rooms": total_rooms,
@@ -180,6 +205,25 @@ class CreateYooKassaPaymentView(APIView):
         except Booking.DoesNotExist:
             return Response({"error": "Бронь не найдена или уже оплачена"}, status=status.HTTP_404_NOT_FOUND)
 
+        # --- СУПЕР-ЗАЩИТА ОТ NoneType ---
+        # 1. Пытаемся взять первое размещение
+        placement = booking.placements.first()
+
+        # 2. Если price_per_night пустой (None), берем цену из категории комнаты
+        if not placement or placement.price_per_night is None:
+            price = booking.placements.first().room.price if placement else 0
+        else:
+            price = placement.price_per_night
+
+        # 3. Вычисляем цену, если она нулевая или пустая
+        days = (booking.check_out_date - booking.check_in_date).days or 1
+        booking.total_price = days * price
+        booking.save()
+
+        if booking.total_price <= 0:
+            return Response({"error": "Ошибка: цена бронирования не может быть 0"}, status=400)
+        # --------------------------------
+
         with transaction.atomic():
             idempotence_key = str(uuid.uuid4())
 
@@ -196,7 +240,7 @@ class CreateYooKassaPaymentView(APIView):
                 "description": f"Оплата бронирования №{booking.id} в OASIS Hotel"
             }, idempotence_key)
 
-            our_payment = Payment.objects.create(
+            Payment.objects.create(
                 booking=booking,
                 amount=booking.total_price,
                 yookassa_payment_id=yookassa_payment.id,
@@ -204,7 +248,6 @@ class CreateYooKassaPaymentView(APIView):
             )
 
         return Response({"confirmation_url": yookassa_payment.confirmation.confirmation_url})
-
 
 class CheckPaymentStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
