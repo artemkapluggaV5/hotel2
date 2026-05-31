@@ -196,40 +196,37 @@ class CreateYooKassaPaymentView(APIView):
 
     def post(self, request):
         booking_id = request.data.get('booking_id')
+        frontend_url = request.data.get('return_url', 'http://localhost:5173')
+
         try:
             booking = Booking.objects.get(id=booking_id, user=request.user, status='pending')
+
+            calculated_price = sum(
+                placement.room.price
+                for placement in booking.placements.all()
+            )
+
+            booking.total_price = calculated_price
+            booking.save()
+
+            if booking.total_price <= 0:
+                return Response({"error": "Сумма бронирования не может быть 0. Добавьте номера."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
         except Booking.DoesNotExist:
-            return Response({"error": "Бронь не найдена или уже оплачена"}, status=status.HTTP_404_NOT_FOUND)
-
-        placement = booking.placements.first()
-
-        if not placement or placement.price_per_night is None:
-            price = booking.placements.first().room.price if placement else 0
-        else:
-            price = placement.price_per_night
-
-        days = (booking.check_out_date - booking.check_in_date).days or 1
-        booking.total_price = days * price
-        booking.save()
-
-        if booking.total_price <= 0:
-            return Response({"error": "Ошибка: цена бронирования не может быть 0"}, status=400)
-
+            return Response({"error": "Бронь не найдена"}, status=404)
 
         with transaction.atomic():
             idempotence_key = str(uuid.uuid4())
 
             yookassa_payment = YooPayment.create({
-                "amount": {
-                    "value": str(booking.total_price),
-                    "currency": "RUB"
-                },
+                "amount": {"value": str(booking.total_price), "currency": "RUB"},
                 "confirmation": {
                     "type": "redirect",
-                    "return_url": "http://localhost:5173/account"
+                    "return_url": f"{frontend_url}/account"
                 },
                 "capture": True,
-                "description": f"Оплата бронирования №{booking.id} в OASIS Hotel"
+                "description": f"Оплата бронирования №{booking.id}"
             }, idempotence_key)
 
             Payment.objects.create(
