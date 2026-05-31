@@ -105,13 +105,10 @@ class PlacementViewSet(viewsets.ModelViewSet):
     serializer_class = PlacementSerializer
 
     def get_permissions(self):
-        # Если пытаются создать - разрешаем авторизованным
         if self.action == 'create':
             return [permissions.IsAuthenticated()]
-        # Если обновляют статус (заселение/выезд) - только персонал
         if self.action in ['update', 'partial_update', 'destroy']:
             return [IsStaffOrAdmin()]
-        # Если просто смотрят список - разрешаем всем авторизованным
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
@@ -133,7 +130,6 @@ class PlacementViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     def perform_update(self, serializer):
-        # ... (весь твой код метода останется прежним) ...
         status_before = self.get_object().status
         booking = self.get_object().booking
 
@@ -205,24 +201,20 @@ class CreateYooKassaPaymentView(APIView):
         except Booking.DoesNotExist:
             return Response({"error": "Бронь не найдена или уже оплачена"}, status=status.HTTP_404_NOT_FOUND)
 
-        # --- СУПЕР-ЗАЩИТА ОТ NoneType ---
-        # 1. Пытаемся взять первое размещение
         placement = booking.placements.first()
 
-        # 2. Если price_per_night пустой (None), берем цену из категории комнаты
         if not placement or placement.price_per_night is None:
             price = booking.placements.first().room.price if placement else 0
         else:
             price = placement.price_per_night
 
-        # 3. Вычисляем цену, если она нулевая или пустая
         days = (booking.check_out_date - booking.check_in_date).days or 1
         booking.total_price = days * price
         booking.save()
 
         if booking.total_price <= 0:
             return Response({"error": "Ошибка: цена бронирования не может быть 0"}, status=400)
-        # --------------------------------
+
 
         with transaction.atomic():
             idempotence_key = str(uuid.uuid4())
@@ -256,10 +248,15 @@ class CheckPaymentStatusView(APIView):
         booking_id = request.data.get('booking_id')
 
         with transaction.atomic():
-            try:
-                payment = Payment.objects.select_for_update().get(booking__id=booking_id, status='pending')
-            except Payment.DoesNotExist:
-                return Response({"message": "Оплата уже обработана другим запросом."})
+            payments = Payment.objects.select_for_update().filter(
+                booking__id=booking_id,
+                status='pending'
+            ).order_by('-id')
+
+            if not payments.exists():
+                return Response({"message": "Нет ожидающих платежей для этой брони."})
+
+            payment = payments.first()
 
             try:
                 yookassa_payment = YooPayment.find_one(payment.yookassa_payment_id)
@@ -271,26 +268,21 @@ class CheckPaymentStatusView(APIView):
                 payment.status = 'paid'
                 payment.save()
 
+                payments.exclude(id=payment.id).update(status='canceled')
+
                 booking = payment.booking
                 booking.status = 'confirmed'
                 booking.save()
 
-                rooms_info = []
-                for placement in booking.placements.all():
-                    rooms_info.append(f"№{placement.room.room_number} ({placement.room.category.name})")
-
-                rooms_text = ", ".join(rooms_info) if rooms_info else "Не назначен"
-
+                rooms_info = [f"№{p.room.room_number} ({p.room.category.name})" for p in booking.placements.all()]
+                rooms_text = ", ".join(rooms_info)
                 user = booking.user
                 if user.telegram_id:
                     msg = (
                         f"🎉 <b>Оплата прошла успешно!</b>\n\n"
                         f"🏨 Бронирование <b>№{booking.id}</b> подтверждено.\n"
                         f"🛏 <b>Номер:</b> {rooms_text}\n" 
-                        f"📅 Заезд: {booking.check_in_date}\n"
-                        f"📅 Выезд: {booking.check_out_date}\n"
-                        f"💰 Оплачено: {payment.amount} ₽\n\n"
-                        f"Ждем вас в OASIS Hotel!"
+                        f"💰 Оплачено: {payment.amount} ₽"
                     )
                     send_telegram_message(user.telegram_id, msg)
 
